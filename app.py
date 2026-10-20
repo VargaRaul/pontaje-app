@@ -8,9 +8,9 @@ st.set_page_config(page_title="Generator Pontaje cu AI", layout="wide")
 st.title("Pontaje politie")
 
 # Bara laterală pentru cheia API
-st.sidebar.header("🔑 Setări AI")
+st.sidebar.header("Setări AI")
 api_key = st.sidebar.text_input(
-    "Lipește Cheia Gemini API:", 
+    "Cheia pentru Gemini API:", 
     type="password", 
     help="Cheia generată gratuit din Google AI Studio"
 )
@@ -18,20 +18,20 @@ api_key = st.sidebar.text_input(
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("1. Date brute (Imagini sau Text)")
+    st.subheader("1. Date (imagine/text)")
     uploaded_files = st.file_uploader(
         "Încarcă screenshot-urile cu pontaje:", 
         type=["png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
     raw_text_input = st.text_area(
-        "Sau lipește textul brut aici (opțional):", 
+        "Încarcă text-ul direct:", 
         height=260, 
         placeholder="Lipește textul brut dacă îl ai deja copiat..."
     )
 
 with col2:
-    st.subheader("2. Lista țintă cu ID-uri (Lista 2)")
+    st.subheader("2. Lista cu ID-uri")
     id_list_input = st.text_area(
         "Lipește lista de ID-uri (inclusiv DELIMITARE):", 
         height=380, 
