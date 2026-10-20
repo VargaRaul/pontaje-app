@@ -38,32 +38,43 @@ with col2:
         placeholder="32207\n15330\nDELIMITARE\n28494"
     )
 
-def parse_time_string(time_str):
+def parse_time_details(time_str):
     if not time_str or "fara" in str(time_str).lower():
-        return "00:00:00"
+        return "00:00:00", 0
     
     clean = str(time_str).lower().replace('lóh', '16h').replace('th', '7h').replace('ld', '1d')
     
     d = re.search(r'(\d+)\s*d', clean)
     h = re.search(r'(\d+)\s*h', clean)
     m = re.search(r'(\d+)\s*m', clean)
+    s = re.search(r'(\d+)\s*s', clean)
 
     days = int(d.group(1)) if d else 0
     hours = int(h.group(1)) if h else 0
     minutes = int(m.group(1)) if m else 0
+    seconds = int(s.group(1)) if s else 0
 
     total_hours = days * 24 + hours
-    return f"{total_hours:02d}:{minutes:02d}:00"
+    total_seconds = days * 86400 + hours * 3600 + minutes * 60 + seconds
+    return f"{total_hours:02d}:{minutes:02d}:00", total_seconds
 
 def extract_from_text(text):
     entries = {}
-    matches = list(re.finditer(r'\[(\d+)\]', text))
+    matches = list(re.finditer(r'([^\n\r\[]+)?\[(\d+)\]', text))
     for i, match in enumerate(matches):
-        id_val = match.group(1)
+        raw_name = match.group(1)
+        name = raw_name.strip() if raw_name else f"Membru [{match.group(2)}]"
+        id_val = match.group(2)
         start_idx = match.end()
         end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         block = text[start_idx:end_idx]
-        entries[id_val] = parse_time_string(block)
+        formatted_time, total_secs = parse_time_details(block)
+        entries[id_val] = {
+            "formatted": formatted_time,
+            "seconds": total_secs,
+            "name": name,
+            "id": id_val
+        }
     return entries
 
 def extract_all_with_gemini(images, key):
@@ -72,12 +83,16 @@ def extract_all_with_gemini(images, key):
     
     prompt = """
     Analizează cu atenție TOATE imaginile furnizate cu pontaje/jurnale de activitate.
-    Pentru fiecare utilizator/jucător identificat prin [ID] (numărul din paranteze drepte, de exemplu [15330], [32207]), extrage:
+    Pentru fiecare utilizator identificat prin Nume [ID], extrage:
+    - Numele utilizatorului
     - ID-ul numeric exact (fără paranteze)
     - Durata activității/pontajul (de exemplu: '1d 5h 28m', '14h 35m', '22m', 'fara', etc.)
     
-    Răspunde STRICT cu un dicționar JSON valid, fără explicații, fără markdown:
-    {"ID": "durata", "altID": "durata"}
+    Răspunde STRICT cu un dicționar JSON valid, fără explicații sau markdown:
+    {
+      "ID": {"nume": "Nume", "durata": "durata"},
+      "altID": {"nume": "Alt Nume", "durata": "durata"}
+    }
     Dacă la un ID scrie 'fara', pune valoarea 'fara'.
     Asigură-te că parcurgi toate imaginile și nu omiți niciun ID.
     """
@@ -100,14 +115,28 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
     else:
         all_entries = {}
         
-        # 1. Procesare poze într-un singur apel
+        # 1. Procesare poze cu Gemini
         if uploaded_files and api_key:
-            with st.spinner(f"AI-ul analizează toate cele {len(uploaded_files)} imagini într-un singur apel..."):
+            with st.spinner(f"AI-ul analizează toate cele {len(uploaded_files)} imagini..."):
                 try:
                     pil_images = [Image.open(f) for f in uploaded_files]
                     ai_data = extract_all_with_gemini(pil_images, api_key)
                     for k, v in ai_data.items():
-                        all_entries[str(k).strip()] = parse_time_string(v)
+                        id_str = str(k).strip()
+                        if isinstance(v, dict):
+                            name_str = v.get("nume", f"Membru [{id_str}]")
+                            dur_str = v.get("durata", "00:00:00")
+                        else:
+                            name_str = f"Membru [{id_str}]"
+                            dur_str = str(v)
+                        
+                        f_time, secs = parse_time_details(dur_str)
+                        all_entries[id_str] = {
+                            "formatted": f_time,
+                            "seconds": secs,
+                            "name": name_str,
+                            "id": id_str
+                        }
                 except Exception as e:
                     st.error(f"Eroare la citirea imaginilor: {e}")
 
@@ -119,6 +148,31 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         if not all_entries:
             st.error("Nu s-au putut extrage date. Verifică imaginile sau textul introdus.")
         else:
+            # Afișare TOP 5 Cei mai activi
+            st.divider()
+            st.subheader("🏆 Top 5 Cei Mai Activi Membri")
+            
+            medals = ["🥇 Locul 1", "🥈 Locul 2", "🥉 Locul 3", "🎖️ Locul 4", "🎖️ Locul 5"]
+            sorted_top = sorted(all_entries.values(), key=lambda x: x["seconds"], reverse=True)[:5]
+            
+            top_cols = st.columns(len(sorted_top))
+            top_summary_lines = []
+            
+            for idx, member in enumerate(sorted_top):
+                with top_cols[idx]:
+                    st.metric(
+                        label=f"{medals[idx]}: {member['name']} [{member['id']}]",
+                        value=member["formatted"]
+                    )
+                top_summary_lines.append(f"{idx+1}. {member['name']} [{member['id']}] - {member['formatted']}")
+            
+            # Format text rapid de copiat pentru Top 5
+            st.caption("Format text rapid pentru Top 5:")
+            st.code("\n".join(top_summary_lines), language="text")
+            
+            st.divider()
+            
+            # Generare listă mapată pentru Google Sheets (Lista 2)
             output_lines = []
             for line in id_list_input.strip().splitlines():
                 clean = line.strip()
@@ -127,11 +181,11 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
                 if clean.upper() == "DELIMITARE":
                     output_lines.append("DELIMITARE")
                 elif clean in all_entries:
-                    output_lines.append(all_entries[clean])
+                    output_lines.append(all_entries[clean]["formatted"])
                 else:
                     output_lines.append("LIPSA")
             
             result_text = "\n".join(output_lines)
-            st.success(f"Gata! Au fost găsite {len(all_entries)} pontaje unice.")
+            st.subheader("📋 Lista completă pentru Foaia de Calcul:")
             st.text_area("Rezultat final (gata de copiat):", value=result_text, height=350)
             st.download_button("📥 Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
