@@ -187,5 +187,5 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
             
             result_text = "\n".join(output_lines)
             st.subheader("📋 Lista completă pentru Foaia de Calcul:")
-            st.text_area("Rezultat final (gata de copiat):", value=result_text, height=350)
-            st.download_button("📥 Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
+            st.text_area("Rezultat final:", value=result_text, height=350)
+            st.download_button("Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
