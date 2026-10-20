@@ -5,7 +5,7 @@ from PIL import Image
 import google.generativeai as genai
 
 st.set_page_config(page_title="Generator Pontaje cu AI", layout="wide")
-st.title("⏱️ Generator Automat de Pontaje (AI Vision)")
+st.title("Pontaje politie")
 
 # Bara laterală pentru cheia API
 st.sidebar.header("🔑 Setări AI")
