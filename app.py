@@ -68,16 +68,36 @@ def extract_from_text(text):
 
 def extract_with_gemini(images, key):
     genai.configure(api_key=key)
-    # Folosim modelul Flash rapid și precis pe imagini
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    
+    # Selectăm automat primul model compatibil activ pe cont
+    model_name = None
+    try:
+        available_models = [
+            m.name for m in genai.list_models() 
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        # Căutăm cu prioritate un model flash
+        for m in available_models:
+            if 'flash' in m.lower():
+                model_name = m
+                break
+        if not model_name and available_models:
+            model_name = available_models[0]
+    except Exception:
+        model_name = "gemini-1.5-flash-latest"
+
+    if not model_name:
+        model_name = "gemini-1.5-flash-latest"
+
+    model = genai.GenerativeModel(model_name)
     
     prompt = """
-    Analizează cu atenție toate aceste imagini cu pontaje/jurnale de activitate.
-    Pentru fiecare utilizator/jucător identificat prin [ID] (numărul din paranteze drepte), extrage:
-    - ID-ul numeric exact
+    Analizează cu atenție imaginile cu pontaje/jurnale de activitate.
+    Pentru fiecare utilizator/jucător identificat prin [ID] (numărul din paranteze drepte, de exemplu [15330]), extrage:
+    - ID-ul numeric exact (fără paranteze)
     - Durata activității/pontajul (de exemplu: '1d 5h 28m', '14h 35m', '22m', 'fara', etc.)
     
-    Răspunde STRICT cu un dicționar JSON valid, fără explicații, fără markdown:
+    Răspunde STRICT cu un dicționar JSON valid, fără explicații sau markdown:
     {"ID": "durata", "altID": "durata"}
     Dacă scrie 'fara', pune 'fara'.
     """
@@ -102,7 +122,7 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         
         # 1. Procesare poze cu Gemini AI
         if uploaded_files and api_key:
-            with st.spinner("AI-ul citește și analizează imaginile..."):
+            with st.spinner("AI-ul detectează modelul și analizează imaginile..."):
                 try:
                     pil_images = [Image.open(f) for f in uploaded_files]
                     ai_data = extract_with_gemini(pil_images, api_key)
@@ -111,7 +131,7 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
                 except Exception as e:
                     st.error(f"Eroare la citirea imaginilor cu AI: {e}")
 
-        # 2. Procesare text brut suplimentar (dacă a fost completat)
+        # 2. Procesare text brut suplimentar (dacă există)
         if raw_text_input.strip():
             text_entries = extract_from_text(raw_text_input)
             all_entries.update(text_entries)
