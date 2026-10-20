@@ -1,7 +1,6 @@
 import streamlit as st
 import re
 import json
-import time
 from PIL import Image
 import google.generativeai as genai
 
@@ -19,7 +18,7 @@ api_key = st.sidebar.text_input(
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("1. Date brute (Toate pozele sau Text)")
+    st.subheader("1. Date brute (Imagini sau Text)")
     uploaded_files = st.file_uploader(
         "Încarcă TOATE screenshot-urile (poți pune oricâte):", 
         type=["png", "jpg", "jpeg"], 
@@ -67,34 +66,31 @@ def extract_from_text(text):
         entries[id_val] = parse_time_string(block)
     return entries
 
-def call_gemini_batch(images, model):
+def extract_all_with_gemini(images, key):
+    genai.configure(api_key=key)
+    model = genai.GenerativeModel("gemini-3.8-flash")
+    
     prompt = """
-    Analizează cu atenție imaginile cu pontaje/jurnale de activitate.
-    Pentru fiecare utilizator/jucător identificat prin [ID] (numărul din paranteze drepte, de exemplu [15330] sau [32207]), extrage:
+    Analizează cu atenție TOATE imaginile furnizate cu pontaje/jurnale de activitate.
+    Pentru fiecare utilizator/jucător identificat prin [ID] (numărul din paranteze drepte, de exemplu [15330], [32207]), extrage:
     - ID-ul numeric exact (fără paranteze)
     - Durata activității/pontajul (de exemplu: '1d 5h 28m', '14h 35m', '22m', 'fara', etc.)
     
-    Răspunde STRICT cu un dicționar JSON valid, fără explicații sau formatare markdown:
+    Răspunde STRICT cu un dicționar JSON valid, fără explicații, fără markdown:
     {"ID": "durata", "altID": "durata"}
-    Dacă scrie 'fara', pune 'fara'.
+    Dacă la un ID scrie 'fara', pune valoarea 'fara'.
+    Asigură-te că parcurgi toate imaginile și nu omiți niciun ID.
     """
     
-    # Încercăm de până la 3 ori dacă dă cotă 429
-    for attempt in range(3):
-        try:
-            content = [prompt] + images
-            response = model.generate_content(content)
-            text = response.text.strip()
-            if text.startswith("```"):
-                text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-                text = re.sub(r"\n```$", "", text)
-            return json.loads(text)
-        except Exception as e:
-            if "429" in str(e) and attempt < 2:
-                time.sleep(20)  # Așteaptă 20s să se reseteze cota gratuită
-            else:
-                raise e
-    return {}
+    content = [prompt] + images
+    response = model.generate_content(content)
+    
+    text = response.text.strip()
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+        text = re.sub(r"\n```$", "", text)
+    
+    return json.loads(text)
 
 if st.button("🚀 Generează Pontajele", type="primary", use_container_width=True):
     if not id_list_input.strip():
@@ -104,41 +100,16 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
     else:
         all_entries = {}
         
-        # 1. Procesare poze pe loturi automate
+        # 1. Procesare poze într-un singur apel
         if uploaded_files and api_key:
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-3.8-flash")
-            
-            BATCH_SIZE = 5  # Trimite câte 5 poze pe rând
-            total_batches = (len(uploaded_files) + BATCH_SIZE - 1) // BATCH_SIZE
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            pil_images = [Image.open(f) for f in uploaded_files]
-            
-            for b_idx in range(total_batches):
-                start = b_idx * BATCH_SIZE
-                end = min(start + BATCH_SIZE, len(pil_images))
-                current_batch = pil_images[start:end]
-                
-                status_text.info(f"⏳ Se procesează lotul {b_idx + 1} din {total_batches} ({len(current_batch)} imagini)...")
-                
+            with st.spinner(f"AI-ul analizează toate cele {len(uploaded_files)} imagini într-un singur apel..."):
                 try:
-                    batch_data = call_gemini_batch(current_batch, model)
-                    for k, v in batch_data.items():
+                    pil_images = [Image.open(f) for f in uploaded_files]
+                    ai_data = extract_all_with_gemini(pil_images, api_key)
+                    for k, v in ai_data.items():
                         all_entries[str(k).strip()] = parse_time_string(v)
                 except Exception as e:
-                    st.error(f"Eroare la lotul {b_idx + 1}: {e}")
-                
-                progress_bar.progress((b_idx + 1) / total_batches)
-                
-                # Pauză scurtă între cereri pentru a proteja limita gratuită
-                if b_idx < total_batches - 1:
-                    time.sleep(14)
-            
-            status_text.empty()
-            progress_bar.empty()
+                    st.error(f"Eroare la citirea imaginilor: {e}")
 
         # 2. Procesare text brut suplimentar (dacă există)
         if raw_text_input.strip():
@@ -161,6 +132,6 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
                     output_lines.append("LIPSA")
             
             result_text = "\n".join(output_lines)
-            st.success(f"Gata! Au fost găsite {len(all_entries)} pontaje unice în imagini.")
-            st.text_area("Rezultat final (gata de copiat în foaia de calcul):", value=result_text, height=350)
+            st.success(f"Gata! Au fost găsite {len(all_entries)} pontaje unice.")
+            st.text_area("Rezultat final (gata de copiat):", value=result_text, height=350)
             st.download_button("📥 Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
