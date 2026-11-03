@@ -40,7 +40,7 @@ with col2:
     )
 
 def optimize_image(pil_image, max_dim=800):
-    """Micsorează și comprimă imaginea în format JPEG ultra-ușor pentru viteză maximă."""
+    """Comprimă imaginea în JPEG pentru viteză maximă de transfer."""
     img = pil_image.copy()
     if img.mode != 'RGB':
         img = img.convert('RGB')
@@ -93,11 +93,11 @@ def extract_from_text(text):
 def extract_all_with_gemini(images, keys_str):
     keys = [k.strip() for k in keys_str.split(",") if k.strip()]
     
+    # gemini-3.8-flash este modelul principal recomandat de Google
     models_to_try = [
-        "gemini-1.5-flash",
-        "gemini-2.0-flash",
+        "gemini-3.8-flash",
         "gemini-2.5-flash",
-        "gemini-3.8-flash"
+        "gemini-1.5-flash"
     ]
     
     prompt = """
@@ -123,10 +123,8 @@ def extract_all_with_gemini(images, keys_str):
         for model_name in models_to_try:
             try:
                 model = genai.GenerativeModel(model_name)
-                content = [prompt] + images
-                # Setăm timeout extins la 300 de secunde (5 minute)
                 response = model.generate_content(
-                    content,
+                    [prompt] + images,
                     request_options={"timeout": 300}
                 )
                 
@@ -138,10 +136,8 @@ def extract_all_with_gemini(images, keys_str):
                 return json.loads(text)
             except Exception as e:
                 last_error = e
-                if "429" in str(e) or "quota" in str(e).lower() or "not found" in str(e).lower() or "504" in str(e) or "deadline" in str(e).lower():
-                    continue
-                else:
-                    raise e
+                # Trecem automat la următorul model sau cheie la orice eroare
+                continue
 
     if last_error:
         raise last_error
@@ -155,7 +151,7 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         all_entries = {}
         
         if uploaded_files and api_key_input.strip():
-            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini în mod ultra-rapid..."):
+            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini..."):
                 try:
                     optimized_images = [optimize_image(Image.open(f)) for f in uploaded_files]
                     
