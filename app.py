@@ -5,10 +5,10 @@ from PIL import Image
 import google.generativeai as genai
 
 st.set_page_config(page_title="Generator Pontaje cu AI", layout="wide")
-st.title("Pontaje politie")
+st.title("⏱️ Generator Automat de Pontaje (AI Vision)")
 
 # Bara laterală pentru cheia API
-st.sidebar.header("Setări AI")
+st.sidebar.header("🔑 Setări AI")
 api_key = st.sidebar.text_input(
     "Lipește Cheia Gemini API:", 
     type="password", 
@@ -18,9 +18,9 @@ api_key = st.sidebar.text_input(
 col1, col2 = st.columns(2)
 
 with col1:
-    st.subheader("1. Date brute (text/imagine)")
+    st.subheader("1. Date brute (Imagini sau Text)")
     uploaded_files = st.file_uploader(
-        "Încarcă TOATE screenshot-urile", 
+        "Încarcă TOATE screenshot-urile (poți pune oricâte):", 
         type=["png", "jpg", "jpeg"], 
         accept_multiple_files=True
     )
@@ -31,12 +31,18 @@ with col1:
     )
 
 with col2:
-    st.subheader("2. Lista ID-uri")
+    st.subheader("2. Lista țintă cu ID-uri (Lista 2)")
     id_list_input = st.text_area(
         "Lipește lista de ID-uri (inclusiv DELIMITARE):", 
         height=380, 
         placeholder="32207\n15330\nDELIMITARE\n28494"
     )
+
+def optimize_image(pil_image, max_dim=1024):
+    """Comprimă și redimensionează imaginea pentru a reduce pachetul trimis la API."""
+    img = pil_image.copy()
+    img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
+    return img
 
 def parse_time_details(time_str):
     if not time_str or "fara" in str(time_str).lower():
@@ -115,12 +121,14 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
     else:
         all_entries = {}
         
-        # 1. Procesare poze cu Gemini
+        # 1. Procesare poze optimizate cu Gemini
         if uploaded_files and api_key:
-            with st.spinner(f"AI-ul analizează toate cele {len(uploaded_files)} imagini..."):
+            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini într-un singur pachet..."):
                 try:
-                    pil_images = [Image.open(f) for f in uploaded_files]
-                    ai_data = extract_all_with_gemini(pil_images, api_key)
+                    # Comprimare și redimensionare automată în memorie
+                    optimized_images = [optimize_image(Image.open(f)) for f in uploaded_files]
+                    
+                    ai_data = extract_all_with_gemini(optimized_images, api_key)
                     for k, v in ai_data.items():
                         id_str = str(k).strip()
                         if isinstance(v, dict):
@@ -150,9 +158,9 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         else:
             # Afișare TOP 5 Cei mai activi
             st.divider()
-            st.subheader("Top 5 Cei Mai Activi Membri")
+            st.subheader("🏆 Top 5 Cei Mai Activi Membri")
             
-            medals = ["Locul 1", "Locul 2", "Locul 3", "Locul 4", "Locul 5"]
+            medals = ["🥇 Locul 1", "🥈 Locul 2", "🥉 Locul 3", "🎖️ Locul 4", "🎖️ Locul 5"]
             sorted_top = sorted(all_entries.values(), key=lambda x: x["seconds"], reverse=True)[:5]
             
             top_cols = st.columns(len(sorted_top))
@@ -187,5 +195,5 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
             
             result_text = "\n".join(output_lines)
             st.subheader("📋 Lista completă pentru Foaia de Calcul:")
-            st.text_area("Rezultat final:", value=result_text, height=350)
-            st.download_button("Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
+            st.text_area("Rezultat final (gata de copiat):", value=result_text, height=350)
+            st.download_button("📥 Descarcă fișier text (.txt)", result_text, file_name="pontaje.txt")
