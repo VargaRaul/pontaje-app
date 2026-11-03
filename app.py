@@ -1,6 +1,7 @@
 import streamlit as st
 import re
 import json
+import io
 from PIL import Image
 import google.generativeai as genai
 
@@ -9,10 +10,10 @@ st.title("⏱️ Generator Automat de Pontaje (AI Vision)")
 
 # Bara laterală pentru cheia API
 st.sidebar.header("🔑 Setări AI")
-api_key = st.sidebar.text_input(
-    "Lipește Cheia Gemini API:", 
+api_key_input = st.sidebar.text_input(
+    "Lipește Cheia Gemini API (sau mai multe, separate prin virgulă):", 
     type="password", 
-    help="Cheia generată gratuit din Google AI Studio"
+    help="Poți lipi o cheie sau mai multe separate prin virgulă pentru rotație automată"
 )
 
 col1, col2 = st.columns(2)
@@ -38,11 +39,17 @@ with col2:
         placeholder="32207\n15330\nDELIMITARE\n28494"
     )
 
-def optimize_image(pil_image, max_dim=1024):
-    """Comprimă și redimensionează imaginea pentru a reduce pachetul trimis la API."""
+def optimize_image(pil_image, max_dim=800):
+    """Micsorează și comprimă imaginea în format JPEG ultra-ușor pentru viteză maximă."""
     img = pil_image.copy()
+    if img.mode != 'RGB':
+        img = img.convert('RGB')
     img.thumbnail((max_dim, max_dim), Image.Resampling.LANCZOS)
-    return img
+    
+    buffer = io.BytesIO()
+    img.save(buffer, format="JPEG", quality=75)
+    buffer.seek(0)
+    return Image.open(buffer)
 
 def parse_time_details(time_str):
     if not time_str or "fara" in str(time_str).lower():
@@ -83,9 +90,15 @@ def extract_from_text(text):
         }
     return entries
 
-def extract_all_with_gemini(images, key):
-    genai.configure(api_key=key)
-    model = genai.GenerativeModel("gemini-3.8-flash")
+def extract_all_with_gemini(images, keys_str):
+    keys = [k.strip() for k in keys_str.split(",") if k.strip()]
+    
+    models_to_try = [
+        "gemini-1.5-flash",
+        "gemini-2.0-flash",
+        "gemini-2.5-flash",
+        "gemini-3.8-flash"
+    ]
     
     prompt = """
     Analizează cu atenție TOATE imaginile furnizate cu pontaje/jurnale de activitate.
@@ -103,32 +116,50 @@ def extract_all_with_gemini(images, key):
     Asigură-te că parcurgi toate imaginile și nu omiți niciun ID.
     """
     
-    content = [prompt] + images
-    response = model.generate_content(content)
+    last_error = None
     
-    text = response.text.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-        text = re.sub(r"\n```$", "", text)
-    
-    return json.loads(text)
+    for key in keys:
+        genai.configure(api_key=key)
+        for model_name in models_to_try:
+            try:
+                model = genai.GenerativeModel(model_name)
+                content = [prompt] + images
+                # Setăm timeout extins la 300 de secunde (5 minute)
+                response = model.generate_content(
+                    content,
+                    request_options={"timeout": 300}
+                )
+                
+                text = response.text.strip()
+                if text.startswith("```"):
+                    text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+                    text = re.sub(r"\n```$", "", text)
+                
+                return json.loads(text)
+            except Exception as e:
+                last_error = e
+                if "429" in str(e) or "quota" in str(e).lower() or "not found" in str(e).lower() or "504" in str(e) or "deadline" in str(e).lower():
+                    continue
+                else:
+                    raise e
+
+    if last_error:
+        raise last_error
 
 if st.button("🚀 Generează Pontajele", type="primary", use_container_width=True):
     if not id_list_input.strip():
         st.error("Te rog să introduci lista de ID-uri la Pasul 2.")
-    elif uploaded_files and not api_key:
+    elif uploaded_files and not api_key_input.strip():
         st.error("Te rog să introduci cheia Google Gemini API în bara laterală din stânga!")
     else:
         all_entries = {}
         
-        # 1. Procesare poze optimizate cu Gemini
-        if uploaded_files and api_key:
-            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini într-un singur pachet..."):
+        if uploaded_files and api_key_input.strip():
+            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini în mod ultra-rapid..."):
                 try:
-                    # Comprimare și redimensionare automată în memorie
                     optimized_images = [optimize_image(Image.open(f)) for f in uploaded_files]
                     
-                    ai_data = extract_all_with_gemini(optimized_images, api_key)
+                    ai_data = extract_all_with_gemini(optimized_images, api_key_input)
                     for k, v in ai_data.items():
                         id_str = str(k).strip()
                         if isinstance(v, dict):
@@ -148,7 +179,6 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
                 except Exception as e:
                     st.error(f"Eroare la citirea imaginilor: {e}")
 
-        # 2. Procesare text brut suplimentar (dacă există)
         if raw_text_input.strip():
             text_entries = extract_from_text(raw_text_input)
             all_entries.update(text_entries)
@@ -156,7 +186,6 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         if not all_entries:
             st.error("Nu s-au putut extrage date. Verifică imaginile sau textul introdus.")
         else:
-            # Afișare TOP 5 Cei mai activi
             st.divider()
             st.subheader("🏆 Top 5 Cei Mai Activi Membri")
             
@@ -174,13 +203,11 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
                     )
                 top_summary_lines.append(f"{idx+1}. {member['name']} [{member['id']}] - {member['formatted']}")
             
-            # Format text rapid de copiat pentru Top 5
             st.caption("Format text rapid pentru Top 5:")
             st.code("\n".join(top_summary_lines), language="text")
             
             st.divider()
             
-            # Generare listă mapată pentru Google Sheets (Lista 2)
             output_lines = []
             for line in id_list_input.strip().splitlines():
                 clean = line.strip()
