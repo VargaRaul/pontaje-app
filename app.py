@@ -93,13 +93,6 @@ def extract_from_text(text):
 def extract_all_with_gemini(images, keys_str):
     keys = [k.strip() for k in keys_str.split(",") if k.strip()]
     
-    # gemini-3.8-flash este modelul principal recomandat de Google
-    models_to_try = [
-        "gemini-3.8-flash",
-        "gemini-2.5-flash",
-        "gemini-1.5-flash"
-    ]
-    
     prompt = """
     Analizează cu atenție TOATE imaginile furnizate cu pontaje/jurnale de activitate.
     Pentru fiecare utilizator identificat prin Nume [ID], extrage:
@@ -119,25 +112,41 @@ def extract_all_with_gemini(images, keys_str):
     last_error = None
     
     for key in keys:
-        genai.configure(api_key=key)
-        for model_name in models_to_try:
+        try:
+            genai.configure(api_key=key)
+            
+            # Preluare dinamică a modelelor valide pentru API-ul tău
+            valid_models = []
             try:
-                model = genai.GenerativeModel(model_name)
-                response = model.generate_content(
-                    [prompt] + images,
-                    request_options={"timeout": 300}
-                )
-                
-                text = response.text.strip()
-                if text.startswith("```"):
-                    text = re.sub(r"^```[a-zA-Z]*\n", "", text)
-                    text = re.sub(r"\n```$", "", text)
-                
-                return json.loads(text)
-            except Exception as e:
-                last_error = e
-                # Trecem automat la următorul model sau cheie la orice eroare
-                continue
+                for m in genai.list_models():
+                    if 'generateContent' in m.supported_generation_methods:
+                        valid_models.append(m.name)
+            except Exception:
+                valid_models = ["models/gemini-1.5-flash-latest", "models/gemini-1.5-pro-latest"]
+
+            # Prioritizare modele de tip Flash
+            valid_models.sort(key=lambda x: 0 if 'flash' in x.lower() else 1)
+
+            for model_name in valid_models:
+                try:
+                    model = genai.GenerativeModel(model_name)
+                    response = model.generate_content(
+                        [prompt] + images,
+                        request_options={"timeout": 300}
+                    )
+                    
+                    text = response.text.strip()
+                    if text.startswith("```"):
+                        text = re.sub(r"^```[a-zA-Z]*\n", "", text)
+                        text = re.sub(r"\n```$", "", text)
+                    
+                    return json.loads(text)
+                except Exception as e:
+                    last_error = e
+                    continue
+        except Exception as e:
+            last_error = e
+            continue
 
     if last_error:
         raise last_error
@@ -151,7 +160,7 @@ if st.button("🚀 Generează Pontajele", type="primary", use_container_width=Tr
         all_entries = {}
         
         if uploaded_files and api_key_input.strip():
-            with st.spinner(f"Optimizăm și analizăm cele {len(uploaded_files)} imagini..."):
+            with st.spinner(f"Detectăm automat modelele active și analizăm cele {len(uploaded_files)} imagini..."):
                 try:
                     optimized_images = [optimize_image(Image.open(f)) for f in uploaded_files]
                     
